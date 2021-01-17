@@ -1,0 +1,87 @@
+name: CI
+on: pull_request
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Check out, and set up the node/ruby infra
+      - uses: actions/checkout@v1
+      - uses: actions/setup-node@v1
+        with:
+          node-version: "13.x"
+
+      # Cache yarn deps, to speed up CI
+      - name: Get yarn cache directory path
+        id: yarn-cache-dir-path
+        run: echo "::set-output name=dir::$(yarn config get cacheFolder)"
+
+      - uses: actions/cache@v1
+        id: yarn-cache # use this to check for `cache-hit` (`steps.yarn-cache.outputs.cache-hit != 'true'`)
+        with:
+          path: ${{ steps.yarn-cache-dir-path.outputs.dir }}
+          key: ${{ runner.os }}-yarn-${{ hashFiles('**/yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-yarn-
+
+      # Get dependencies for building the ebooks
+      - run: sudo apt-get update
+      - run: sudo apt install calibre
+
+      # Install, should be absically instant if cached
+      - run: yarn install
+        env:
+          YARN_CHECKSUM_BEHAVIOR: ignore
+
+      # Verify dependencies are hooked up right
+      - run: node test/verifyPackageVersions.js
+
+      # Build the packages
+      - run: yarn bootstrap
+      - run: yarn workspace typescriptlang-org build
+
+      # Verify it compiles
+      - run: yarn compile
+      # Run all the package's tests
+      - run: yarn test
+        env:
+          CI: true
+
+      # danger for PR builds
+      - if: github.event_name == 'pull_request' && github.event.base.repo.id == github.event.head.repo.id
+        run: "yarn danger ci"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_DEPLOY_URL_ROOT: ${{ steps.deploy.outputs.static_web_app_url }}
+
+      - name: "Validates that TypeScript plugins work"
+        run: |
+          cd ..
+          npm init typescript-playground-plugin playground-my-plugin
+
+      # Verify localizations are hooked up right
+      - run: node packages/typescriptlang-org/scripts/validatePathsInLocalizedFolders.js
+
+  windows:
+    runs-on: windows-latest
+
+    steps:
+      # Check out, and set up the node infra
+      - uses: actions/checkout@v1
+      - uses: actions/setup-node@v1
+        with:
+          node-version: "13.x"
+
+      # Get local dependencies
+      - run: yarn install
+        env:
+          YARN_CHECKSUM_BEHAVIOR: ignore
+
+      - run: yarn bootstrap
+      - run: yarn build
+
+      - name: "Validates that TypeScript plugins work"
+        run: |
+          cd ..
+          npm init typescript-playground-plugin playground-my-plugin
